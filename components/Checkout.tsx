@@ -1,32 +1,138 @@
 
-import React, { useState } from 'react';
-import { ArrowLeft, Lock, Clock, CreditCard, ShieldCheck } from 'lucide-react';
-import { UserDetails } from '../types';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Lock, Clock, CreditCard, ShieldCheck, MapPin } from 'lucide-react';
+import { UserDetails, UserProfile } from '../types';
 import { CUTOFF_HOUR, RAZORPAY_KEY_ID, STORE_NAME } from '../constants';
+import * as Store from '../services/store';
 
 interface CheckoutProps {
   total: number;
+  currentUser: UserProfile | null;
   goBack: () => void;
   onPlaceOrder: (details: UserDetails, paymentId: string) => Promise<void>;
 }
 
-const Checkout: React.FC<CheckoutProps> = ({ total, goBack, onPlaceOrder }) => {
+const Checkout: React.FC<CheckoutProps> = ({ total, currentUser, goBack, onPlaceOrder }) => {
   const [details, setDetails] = useState<UserDetails>({
     name: '',
     phone: '',
     address: '',
-    email: ''
+    email: '',
+    deliveryInstructions: '',
+    coordinates: undefined
   });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
 
   const isLate = new Date().getHours() >= CUTOFF_HOUR;
+
+  // Auto-fill form if user is logged in
+  useEffect(() => {
+    if (currentUser) {
+      setDetails({
+        name: currentUser.name,
+        phone: currentUser.phone,
+        address: currentUser.address,
+        email: currentUser.email || '',
+        deliveryInstructions: currentUser.deliveryInstructions || '',
+        coordinates: currentUser.coordinates
+      });
+    }
+  }, [currentUser]);
+
+  const handleDetectLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser");
+      return;
+    }
+
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          
+          // Request specific address details
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`
+          );
+          const data = await response.json();
+          
+          if (data && data.address) {
+             const addr = data.address;
+             
+             // Check for Hyderabad
+             const city = addr.city || addr.state_district || addr.county || '';
+             const isHyderabad = city.toLowerCase().includes('hyderabad') || city.toLowerCase().includes('secunderabad');
+             
+             if (!isHyderabad) {
+                 alert("We currently only deliver within Hyderabad. Please ensure you are in the service area.");
+             }
+
+             // Construct the full address string format (Matches Login logic)
+             // H.No, Building, Street, Area, Pincode
+             
+             const houseNo = addr.house_number || addr.flat_number || '';
+             const building = addr.building || addr.amenity || '';
+             const road = addr.road || '';
+             const area = addr.suburb || addr.neighbourhood || addr.residential || addr.village || addr.city_district || '';
+             const pincode = addr.postcode || '';
+
+             // Filter admin terms
+             const cleanArea = area.replace(/Ward No \d+/i, '').replace(/Circle \d+/i, '').trim();
+
+             const addressParts = [];
+             if (houseNo) addressParts.push(`H.No ${houseNo}`);
+             if (building) addressParts.push(building);
+             if (road) addressParts.push(road);
+             if (cleanArea) addressParts.push(cleanArea);
+             if (city) addressParts.push(city);
+             if (pincode) addressParts.push(pincode);
+             
+             const formattedAddress = addressParts.join(', ');
+             
+             setDetails(prev => ({ 
+                 ...prev, 
+                 address: formattedAddress,
+                 coordinates: { lat: latitude, lng: longitude }
+             }));
+          } else {
+            alert("Could not fetch address from coordinates.");
+          }
+        } catch (error) {
+          console.error("Geocoding error:", error);
+          alert("Failed to get address. Please enter manually.");
+        } finally {
+          setIsLocating(false);
+        }
+      },
+      (error) => {
+        console.error("Location error:", error.message);
+        
+        let msg = "Could not detect location.";
+        // Handle specific Permission Policy error
+        if (error.message.includes("permissions policy")) {
+            msg = "Location access is disabled by browser policy. Please enter address manually.";
+        } else if (error.code === error.PERMISSION_DENIED) {
+           msg = "Permission denied. Please enable location access in your browser settings.";
+        } else if (error.code === error.TIMEOUT) {
+           msg = "Location request timed out.";
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+           msg = "Location unavailable.";
+        }
+        
+        alert(msg);
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isLate) return;
     
-    // Check if key is configured
-    if (RAZORPAY_KEY_ID === "YOUR_RAZORPAY_KEY_ID_HERE") {
+    if ((RAZORPAY_KEY_ID as string) === "YOUR_RAZORPAY_KEY_ID_HERE") {
         alert("Admin Warning: Razorpay Key ID is not configured in constants.ts. Payment cannot proceed.");
         return;
     }
@@ -43,6 +149,20 @@ const Checkout: React.FC<CheckoutProps> = ({ total, goBack, onPlaceOrder }) => {
         handler: function (response: any) {
             // This handler is called AUTOMATICALLY when payment is successful
             setIsProcessing(false);
+            
+            // Update saved user profile with new address/instructions if changed
+            if (currentUser) {
+                const updatedUser: UserProfile = {
+                    ...currentUser,
+                    name: details.name,
+                    email: details.email,
+                    address: details.address,
+                    deliveryInstructions: details.deliveryInstructions,
+                    coordinates: details.coordinates
+                };
+                Store.saveCurrentUser(updatedUser);
+            }
+
             if (response.razorpay_payment_id) {
                 onPlaceOrder(details, response.razorpay_payment_id);
             }
@@ -58,6 +178,7 @@ const Checkout: React.FC<CheckoutProps> = ({ total, goBack, onPlaceOrder }) => {
         modal: {
             ondismiss: function() {
                 setIsProcessing(false);
+                alert("Payment was not completed. If money was deducted, it will be automatically refunded within 5-7 business days.");
             }
         }
     };
@@ -65,7 +186,7 @@ const Checkout: React.FC<CheckoutProps> = ({ total, goBack, onPlaceOrder }) => {
     try {
         const rzp1 = new window.Razorpay(options);
         rzp1.on('payment.failed', function (response: any){
-            alert("Payment Failed: " + response.error.description);
+            alert("Payment Failed: " + response.error.description + "\n\nNote: If any amount was deducted, it will be refunded by Razorpay automatically within 5-7 working days.");
             setIsProcessing(false);
         });
         rzp1.open();
@@ -98,14 +219,14 @@ const Checkout: React.FC<CheckoutProps> = ({ total, goBack, onPlaceOrder }) => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="bg-white p-4 shadow-sm sticky top-0 z-10 flex items-center gap-4">
+      <div className="bg-white p-4 shadow-sm sticky top-0 z-10 flex items-center gap-4 pt-[calc(1rem+safe-area-inset-top)]">
         <button onClick={goBack} className="p-2 hover:bg-gray-100 rounded-full">
           <ArrowLeft size={24} className="text-gray-700" />
         </button>
         <h1 className="text-xl font-bold text-gray-900">Checkout</h1>
       </div>
 
-      <form onSubmit={handleSubmit} className="p-4 space-y-6 max-w-lg mx-auto">
+      <form onSubmit={handleSubmit} className="p-4 space-y-6 max-w-lg mx-auto pb-safe-bottom">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 space-y-4">
           <h3 className="font-bold text-gray-800 flex items-center gap-2">
              <ShieldCheck size={18} className="text-green-600"/> Delivery Details
@@ -128,7 +249,8 @@ const Checkout: React.FC<CheckoutProps> = ({ total, goBack, onPlaceOrder }) => {
             <input
               required
               type="tel"
-              className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all"
+              readOnly={!!currentUser} // Read-only if logged in (user ID)
+              className={`w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all ${currentUser ? 'opacity-70 cursor-not-allowed' : ''}`}
               placeholder="+91 98765 43210"
               value={details.phone}
               onChange={e => setDetails({...details, phone: e.target.value})}
@@ -136,7 +258,17 @@ const Checkout: React.FC<CheckoutProps> = ({ total, goBack, onPlaceOrder }) => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Address</label>
+            <div className="flex justify-between items-center mb-1">
+               <label className="block text-sm font-medium text-gray-700">Delivery Address</label>
+               <button 
+                 type="button" 
+                 onClick={handleDetectLocation}
+                 disabled={isLocating}
+                 className="text-orange-600 text-xs font-bold flex items-center gap-1 bg-orange-50 px-2 py-1 rounded hover:bg-orange-100"
+               >
+                 <MapPin size={12} /> {isLocating ? 'Detecting...' : 'Current Location'}
+               </button>
+            </div>
             <textarea
               required
               rows={3}
@@ -148,14 +280,24 @@ const Checkout: React.FC<CheckoutProps> = ({ total, goBack, onPlaceOrder }) => {
           </div>
 
            <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email (For Receipt)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email (Optional)</label>
             <input
-              required
               type="email"
               className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all"
               placeholder="your@email.com"
               value={details.email}
               onChange={e => setDetails({...details, email: e.target.value})}
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Instructions (Optional)</label>
+            <input
+              type="text"
+              className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all"
+              placeholder="E.g. Leave at security, Don't ring bell"
+              value={details.deliveryInstructions}
+              onChange={e => setDetails({...details, deliveryInstructions: e.target.value})}
             />
           </div>
         </div>
@@ -172,9 +314,14 @@ const Checkout: React.FC<CheckoutProps> = ({ total, goBack, onPlaceOrder }) => {
               </>
           )}
         </button>
-        <p className="text-xs text-center text-gray-500">
-          Secure online payment via Razorpay. Order is confirmed automatically upon success.
-        </p>
+        <div className="text-center space-y-2">
+            <p className="text-xs text-gray-500">
+            Secure online payment via Razorpay. Order is confirmed automatically upon success.
+            </p>
+            <p className="text-[10px] text-red-500 font-medium">
+                Refund Policy: If payment fails but money is deducted, Razorpay will automatically refund it within 5-7 business days.
+            </p>
+        </div>
       </form>
     </div>
   );

@@ -3,7 +3,7 @@ import { MenuItem } from './types';
 
 // IMPORTANT: Replace this with your actual Razorpay Key ID from the Dashboard
 // It usually starts with 'rzp_test_' or 'rzp_live_'
-export const RAZORPAY_KEY_ID = "YOUR_RAZORPAY_KEY_ID_HERE"; 
+export const RAZORPAY_KEY_ID = "rzp_live_RnSm47ymDxiKnm"; 
 
 export const INITIAL_MENU: MenuItem[] = [
   {
@@ -68,6 +68,18 @@ export const INITIAL_MENU: MenuItem[] = [
     rating: 4.2,
     votes: 94
   }
+];
+
+export const CATEGORY_IMAGES: Record<string, string> = {
+  'Recommended': 'https://img.freepik.com/premium-photo/indian-hindu-veg-thali-food-platter-selective-focus_466689-35929.jpg',
+  'Breads': 'https://t3.ftcdn.net/jpg/04/41/20/18/360_F_441201852_XQq4sQ5zZ8gF8j3K7X1X8z8X8z8X8z8.jpg', 
+  'Curries': 'https://t4.ftcdn.net/jpg/06/03/92/29/360_F_603922929_6X0X0X0X0X0X0X0X0X0X0X0X0X0X0X0.jpg',
+  'Other': 'https://cdn-icons-png.flaticon.com/512/706/706164.png'
+};
+
+export const COUPONS = [
+  { code: 'WELCOME50', discountPercent: 50, maxDiscount: 100, minOrder: 150, description: '50% off up to ₹100' },
+  { code: 'TIFFIN20', discountAmount: 20, minOrder: 200, description: 'Flat ₹20 off on orders above ₹200' }
 ];
 
 export const CUTOFF_HOUR = 18; // 6 PM

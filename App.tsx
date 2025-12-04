@@ -1,28 +1,62 @@
 
 import React, { useState, useEffect } from 'react';
-import { ChefHat, Mail, Check, ShoppingBag } from 'lucide-react';
+import { ChefHat, Mail, Check, ShoppingBag, User } from 'lucide-react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Haptics, NotificationType } from '@capacitor/haptics';
 import Menu from './components/Menu';
 import Cart from './components/Cart';
 import Checkout from './components/Checkout';
 import Admin from './components/Admin';
 import Chatbot from './components/Chatbot';
-import { AppState, CartItem, MenuItem, Order, OrderStatus, UserDetails } from './types';
+import Login from './components/Login';
+import { AppState, CartItem, MenuItem, Order, OrderStatus, UserDetails, UserProfile } from './types';
 import * as Store from './services/store';
 
 const App: React.FC = () => {
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [view, setView] = useState<AppState['view']>('HOME');
+  const [view, setView] = useState<AppState['view']>('LOGIN');
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [pinInput, setPinInput] = useState('');
   const [showPinModal, setShowPinModal] = useState(false);
   
   // Secret Admin Access State
   const [logoClickCount, setLogoClickCount] = useState(0);
 
-  // Initial Load
+  // Initial Load - Runs ONLY ONCE when app starts
   useEffect(() => {
+    // Check for logged in user
+    const savedUser = Store.getCurrentUser();
+    if (savedUser) {
+      setCurrentUser(savedUser);
+      setView('HOME');
+    }
     setMenu(Store.getMenu());
-  }, []);
+  }, []); // Empty dependency array ensures this never runs again
+
+  // Handle Android Hardware Back Button - Dependent on view state
+  useEffect(() => {
+    const backButtonListener = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      if (view === 'HOME' && !showPinModal) {
+        CapacitorApp.exitApp();
+      } else if (view === 'LOGIN') {
+        CapacitorApp.exitApp();
+      } else if (showPinModal) {
+        setShowPinModal(false);
+      } else if (view !== 'HOME') {
+        setView('HOME');
+      } else {
+        // Fallback
+        if (canGoBack) {
+          window.history.back();
+        }
+      }
+    });
+
+    return () => {
+      backButtonListener.then(handler => handler.remove());
+    };
+  }, [view, showPinModal]); // This updates whenever view changes
 
   // Secret Access Logic: Reset count if inactive for 2 seconds
   useEffect(() => {
@@ -41,6 +75,19 @@ const App: React.FC = () => {
 
   const handleLogoClick = () => {
     setLogoClickCount(prev => prev + 1);
+  };
+
+  const handleLoginSuccess = (user: UserProfile) => {
+    Store.saveCurrentUser(user);
+    setCurrentUser(user);
+    setView('HOME');
+  };
+
+  const handleLogout = () => {
+    // Optional: Add a logout button feature later if needed
+    Store.logoutUser();
+    setCurrentUser(null);
+    setView('LOGIN');
   };
 
   // Sync menu changes if admin updates it elsewhere (simple simulation)
@@ -77,8 +124,9 @@ const App: React.FC = () => {
     const gst = Math.round(itemTotal * 0.05);
     const finalTotal = itemTotal + platformFee + deliveryFee + gst;
 
+    // Use New Generator for ID
     const newOrder: Order = {
-      id: Date.now().toString(),
+      id: Store.generateOrderId(),
       items: cart,
       totalAmount: finalTotal,
       userDetails: details,
@@ -88,14 +136,16 @@ const App: React.FC = () => {
     };
 
     Store.saveOrder(newOrder);
-    
-    // Save as last order for reordering
     Store.saveLastOrder(cart);
+
+    // Haptics for Success
+    try {
+        await Haptics.notification({ type: NotificationType.Success });
+    } catch (e) {}
 
     setCart([]);
     setView('SUCCESS');
     
-    // Simulate Notification for Admin (Local only)
     if ('Notification' in window && Notification.permission === 'granted') {
        new Notification('New Order Received!', { body: `Order from ${details.name} for ₹${finalTotal}` });
     } else if ('Notification' in window && Notification.permission !== 'denied') {
@@ -116,10 +166,14 @@ const App: React.FC = () => {
 
   const cartItemCount = cart.reduce((acc, i) => acc + i.quantity, 0);
 
-  // Views
+  // View Routing
+  if (view === 'LOGIN') {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
   if (view === 'SUCCESS') {
     return (
-      <div className="min-h-screen bg-green-50 flex flex-col items-center justify-center p-8 text-center animate-fade-in">
+      <div className="min-h-screen bg-green-50 flex flex-col items-center justify-center p-8 text-center animate-fade-in pt-[safe-area-inset-top]">
         <div className="bg-green-100 p-6 rounded-full mb-6 relative">
           <ChefHat size={64} className="text-green-600" />
           <div className="absolute -bottom-2 -right-2 bg-green-500 text-white p-2 rounded-full border-4 border-green-50">
@@ -170,15 +224,18 @@ const App: React.FC = () => {
     const gst = Math.round(itemTotal * 0.05);
     const finalTotal = itemTotal + platformFee + deliveryFee + gst;
 
-    return <Checkout total={finalTotal} goBack={() => setView('CART')} onPlaceOrder={handlePlaceOrder} />;
+    return <Checkout total={finalTotal} currentUser={currentUser} goBack={() => setView('CART')} onPlaceOrder={handlePlaceOrder} />;
   }
 
+  // HOME View
   return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900">
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pt-[safe-area-inset-top]">
       {/* Header */}
       <header className="bg-white p-4 shadow-sm sticky top-0 z-20 flex justify-between items-center">
-        {/* Invisible spacer to center the logo relative to the screen */}
-        <div className="w-10"></div> 
+        {/* Invisible spacer or Profile Icon if needed later */}
+        <div className="w-10 flex items-center justify-center">
+            {currentUser && <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-bold text-xs">{currentUser.name.charAt(0)}</div>}
+        </div>
 
         {/* Secret Admin Trigger: Click Logo 5 times */}
         <div 

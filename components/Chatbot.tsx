@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Bot, User, Loader2 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
@@ -60,6 +61,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ menu }) => {
         - We accept orders strictly before ${CUTOFF_HOUR}:00 PM (18:00).
         - Delivery time is around ${DELIVERY_TIME}.
         - We serve authentic homemade tiffins.
+        - Support Phone: 9959730602
         - Admin contact is available for bulk orders.
         
         Current Menu:
